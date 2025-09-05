@@ -1,3 +1,6 @@
+
+//import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../app_state.dart';
@@ -18,9 +21,31 @@ class SpectrumVisualizer extends StatelessWidget {
           );
         }
 
-        return CustomPaint(
-          painter: SpectrumPainter(appState.latestFft),
-          size: Size.infinite,
+        // The "gooey" effect is achieved by applying a blur and then a color
+        // filter that sharpens the alpha channel, creating a metaball effect.
+        return ColorFiltered(
+          colorFilter: const ColorFilter.matrix(<double>[
+            1, 0, 0, 0, 0,
+            0, 1, 0, 0, 0,
+            0, 0, 1, 0, 0,
+            0, 0, 0, 30, -10, // Increase alpha contrast
+          ]),
+          child: TweenAnimationBuilder<List<double>>(
+            tween: Tween<List<double>>(
+              begin: appState.latestFft,
+              end: appState.latestFft,
+            ),
+            duration: const Duration(milliseconds: 200),
+            builder: (context, value, child) {
+              return CustomPaint(
+                painter: SpectrumPainter(
+                  fftData: value,
+                  color: Colors.lightGreenAccent,
+                ),
+                size: Size.infinite,
+              );
+            },
+          ),
         );
       },
     );
@@ -29,19 +54,22 @@ class SpectrumVisualizer extends StatelessWidget {
 
 class SpectrumPainter extends CustomPainter {
   final List<double> fftData;
+  final Color color;
 
-  SpectrumPainter(this.fftData);
+  SpectrumPainter({required this.fftData, required this.color});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = Colors.lightGreenAccent;
+    final paint = Paint()
+      ..color = color
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10.0); // Blur for the gooey effect
+
     final double barWidth = size.width / fftData.length;
+    final double halfBarWidth = barWidth / 2;
 
     for (int i = 0; i < fftData.length; i++) {
-      // The data is in dB, ranging roughly from 0 down to -120 or lower
       final double dbValue = fftData[i];
 
-      // Map the dB value to a height. We'll map a range, e.g., -90dB to 0dB.
       const double minDb = -90.0;
       const double maxDb = 0.0;
       final double normalized =
@@ -49,13 +77,13 @@ class SpectrumPainter extends CustomPainter {
       final double barHeight = normalized * size.height;
 
       if (barHeight > 0) {
-        canvas.drawRect(
-          Rect.fromLTWH(
-            i * barWidth,
+        // Draw circles instead of rects for a more "bubbly" look
+        canvas.drawCircle(
+          Offset(
+            i * barWidth + halfBarWidth,
             size.height - barHeight,
-            barWidth - 1, // Subtract 1 for spacing between bars
-            barHeight,
           ),
+          halfBarWidth * 2.5, // Make circles overlap
           paint,
         );
       }
@@ -64,6 +92,7 @@ class SpectrumPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant SpectrumPainter oldDelegate) {
-    return true; // For simplicity, always repaint. Could be optimized.
+    // Let the TweenAnimationBuilder handle the repaint decision.
+    return true;
   }
 }

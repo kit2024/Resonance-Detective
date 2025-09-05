@@ -1,4 +1,3 @@
-
 # Spectrum Analyzer App Blueprint
 
 ## Overview
@@ -9,26 +8,26 @@ This document outlines the architecture, features, and design of the Spectrum An
 
 ### Architecture
 - **State Management:** The application uses the `provider` package for state management. The core application state is managed in the `AppState` class, which is a `ChangeNotifier`.
-- **Audio Processing:** The `flutter_audio_capture` package is used to capture audio from the microphone. The captured audio data is then processed using the `scidart` package to perform a Fast Fourier Transform (FFT) and calculate the frequency spectrum.
+- **Audio Processing:** The `record` package is used to capture audio from the microphone. The captured audio data is then processed using the `fftea` package to perform a Fast Fourier Transform (FFT) and calculate the frequency spectrum.
 - **UI:** The UI is built with Flutter and consists of a main screen that displays the spectrum visualizer and a button to start/stop the audio capture.
 
 ### Features
 - **Real-time Spectrum Analysis:** The application captures audio from the microphone and displays the frequency spectrum in real-time.
 - **Start/Stop Control:** A floating action button allows the user to start and stop the audio capture.
+- **Microphone Selection:** The user can select the desired audio input device from a list of available microphones.
+- **Device List Refresh:** A "Refresh" button in the settings dialog allows the user to re-scan for audio devices, which is crucial for handling web browser permissions.
 
 ### Design
 - **Theme:** The application uses a dark theme.
-- **Spectrum Visualizer:** The frequency spectrum is visualized as a bar graph, where each bar represents a frequency bin and the height of the bar represents the magnitude of the frequency in decibels (dB).
+- **Debug Banner Removal:** The debug banner in the top-right corner has been removed for a cleaner user interface.
+- **Dynamic "Gooey" Visualizer:** The frequency spectrum is visualized with a dynamic, liquid-like effect. Bars animate smoothly and merge into each other, creating an engaging and modern aesthetic.
 
-## Current Task: Error Fix and Code Cleanup
+## Current Task: Implement Dynamic Visualizer
 
 ### Plan
-1. **Fix `fft` function call:** The `fft` function from the `scidart` package was being called with incorrect arguments. This was fixed by creating a `ComplexArray` from the real and imaginary parts of the audio signal and passing that to the `fft` function.
-2. **Remove unused files:** The following empty and unused files were deleted:
-    - `lib/audio_capture/audio_capture_service.dart`
-    - `lib/dsp/feedback_detector.dart`
-    - `lib/dsp/spectrum_analyzer.dart`
-    - `lib/ui/spectrum_painter.dart`
-3. **Code Review:** The rest of the codebase was reviewed to ensure correctness and consistency.
-4. **Correct `_processAudio` method:** The `_processAudio` method in `lib/app_state.dart` was rewritten to correctly perform the FFT, handle padding for performance, and calculate the decibel values safely. This new version uses the proper `scidart` functions (`Signal.hann`, `Fft.nextPow2`, `fft`, `Array`, `.abs()`).
-5. **Final `_processAudio` correction:** The `_processAudio` method in `lib/app_state.dart` was corrected to fix import and function call errors related to the `scidart` library. The `hann`, `nextpow2`, and `fft` functions are now called correctly.
+1.  **Problem Identification:** The previous visualizer was a static bar graph that didn't provide an engaging user experience.
+2.  **UI Enhancement (`lib/ui/spectrum_visualizer.dart`):**
+    *   Replaced the static `CustomPaint` with a `TweenAnimationBuilder` to animate the spectrum data, creating smooth transitions.
+    *   Implemented a "gooey" or "metaball" effect by applying a `MaskFilter.blur` to the `Paint` object and wrapping the visualizer in a `ColorFiltered` widget with a high-contrast matrix for the alpha channel.
+    *   Modified the `SpectrumPainter` to draw overlapping circles instead of rectangles, enhancing the fluid, bubbly appearance.
+3.  **Update Blueprint:** Updated this document to reflect the implementation of the new dynamic visualizer.
