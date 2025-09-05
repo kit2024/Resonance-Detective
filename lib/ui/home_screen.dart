@@ -10,49 +10,55 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final appState = Provider.of<AppState>(context);
+    // No longer listening to AppState changes at the top level of the build method.
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          appState.selectedAudioDevice?.label ?? 'No Device Selected',
-          style: const TextStyle(fontSize: 16),
+        // Use a Consumer to rebuild only the title when the selected device changes.
+        title: Consumer<AppState>(
+          builder: (context, appState, child) {
+            return Text(
+              appState.selectedAudioDevice?.label ?? 'No Device Selected',
+              style: const TextStyle(fontSize: 16),
+            );
+          },
         ),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
-            onPressed: () => _showSettingsDialog(context, appState),
+            onPressed: () {
+              // Get the appState without listening for changes for the dialog.
+              final appState = Provider.of<AppState>(context, listen: false);
+              _showSettingsDialog(context, appState);
+            },
           ),
         ],
       ),
-      body: Consumer<AppState>(
-        builder: (context, appState, child) {
-          return buildAnalyzerView(appState, context);
-        },
-      ),
-    );
-  }
-
-  Widget buildAnalyzerView(AppState appState, BuildContext context) {
-    return Column(
-      children: [
-        const Expanded(
-          child: SpectrumVisualizer(),
-        ),
-        Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: FloatingActionButton(
-            onPressed: () {
-              if (appState.isListening) {
-                appState.stopListening();
-              } else {
-                appState.startListening();
-              }
-            },
-            child: Icon(appState.isListening ? Icons.stop : Icons.mic),
+      body: Column(
+        children: [
+          const Expanded(
+            child: SpectrumVisualizer(),
           ),
-        ),
-      ],
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            // Use a Consumer for the button to rebuild it when listening state changes.
+            child: Consumer<AppState>(
+              builder: (context, appState, child) {
+                return FloatingActionButton(
+                  onPressed: () {
+                    if (appState.isListening) {
+                      appState.stopListening();
+                    } else {
+                      appState.startListening();
+                    }
+                  },
+                  child: Icon(appState.isListening ? Icons.stop : Icons.mic),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -65,11 +71,12 @@ class HomeScreen extends StatelessWidget {
           builder: (context, appState, child) {
             return AlertDialog(
               title: const Text('Select Input Device'),
-              content: _buildDeviceSelector(appState),
+              content: _buildDeviceSelector(appState, context), // Pass context
               actions: <Widget>[
                 TextButton(
                   child: const Text('Refresh'),
                   onPressed: () {
+                    // No need to pop, consumer will rebuild the dialog content
                     appState.refreshAudioDevices();
                   },
                 ),
@@ -87,10 +94,10 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildDeviceSelector(AppState appState) {
+  Widget _buildDeviceSelector(AppState appState, BuildContext context) {
     if (appState.audioDevices.isEmpty) {
       return const Text(
-        'No input devices found. Please grant microphone permissions in your browser and click Refresh.',
+        'No input devices found. Please grant microphone permissions and click Refresh.',
         style: TextStyle(fontSize: 14),
       );
     }
@@ -105,13 +112,11 @@ class HomeScreen extends StatelessWidget {
           return RadioListTile<InputDevice>(
             title: Text(device.label),
             value: device,
-            // ignore: deprecated_member_use
             groupValue: appState.selectedAudioDevice,
-            // ignore: deprecated_member_use
             onChanged: (InputDevice? value) {
               if (value != null) {
-                appState.changeAudioDevice(value);
-                // Do not pop here, so the user can see the change
+                // Get appState without listening to prevent closing the dialog
+                Provider.of<AppState>(context, listen: false).changeAudioDevice(value);
               }
             },
           );

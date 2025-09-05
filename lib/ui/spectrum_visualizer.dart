@@ -1,98 +1,185 @@
+import 'dart:async';
+import 'dart:math';
+import 'dart:typed_data';
 
-//import 'dart:ui';
+import 'package:flutter/foundation.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:record/record.dart';
+import 'package:fftea/fftea.dart';
 
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../app_state.dart';
+class AppState with ChangeNotifier {
+  StreamSubscription<Uint8List>? _audioSubscription;
+  final _audioRecorder = AudioRecorder();
+  List<double> _latestFft = [];
+  bool _isListening = false;
+  static const double _dbMin = -90.0;
+  static const int _numBands = 128;
 
-class SpectrumVisualizer extends StatelessWidget {
-  const SpectrumVisualizer({super.key});
+  List<InputDevice> _audioDevices = [];
+  InputDevice? _selectedAudioDevice;
 
-  @override
-  Widget build(BuildContext context) {
-    return Consumer<AppState>(
-      builder: (context, appState, child) {
-        if (appState.latestFft.isEmpty) {
-          return const Center(
-            child: Text(
-              'Start listening to see the spectrum',
-              style: TextStyle(color: Colors.grey, fontSize: 18),
-            ),
-          );
-        }
+  List<double> get latestFft => _latestFft;
+  bool get isListening => _isListening;
+  List<InputDevice> get audioDevices => _audioDevices;
+  InputDevice? get selectedAudioDevice => _selectedAudioDevice;
 
-        // The "gooey" effect is achieved by applying a blur and then a color
-        // filter that sharpens the alpha channel, creating a metaball effect.
-        return ColorFiltered(
-          colorFilter: const ColorFilter.matrix(<double>[
-            1, 0, 0, 0, 0,
-            0, 1, 0, 0, 0,
-            0, 0, 1, 0, 0,
-            0, 0, 0, 30, -10, // Increase alpha contrast
-          ]),
-          child: TweenAnimationBuilder<List<double>>(
-            tween: Tween<List<double>>(
-              begin: appState.latestFft,
-              end: appState.latestFft,
-            ),
-            duration: const Duration(milliseconds: 200),
-            builder: (context, value, child) {
-              return CustomPaint(
-                painter: SpectrumPainter(
-                  fftData: value,
-                  color: Colors.lightGreenAccent,
-                ),
-                size: Size.infinite,
-              );
-            },
-          ),
-        );
-      },
-    );
+  AppState() {
+    // Initialize with a silent baseline
+    _latestFft = List<double>.filled(_numBands, _dbMin);
+    // Fetch audio devices on initialization
+    refreshAudioDevices();
   }
-}
-
-class SpectrumPainter extends CustomPainter {
-  final List<double> fftData;
-  final Color color;
-
-  SpectrumPainter({required this.fftData, required this.color});
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10.0); // Blur for the gooey effect
+  void dispose() {
+    _audioSubscription?.cancel();
+    _audioRecorder.dispose();
+    super.dispose();
+  }
 
-    final double barWidth = size.width / fftData.length;
-    final double halfBarWidth = barWidth / 2;
+  Future<void> refreshAudioDevices() async {
+    final oldSelectedDeviceId = _selectedAudioDevice?.id;
+    _audioDevices = await _audioRecorder.listInputDevices();
 
-    for (int i = 0; i < fftData.length; i++) {
-      final double dbValue = fftData[i];
-
-      const double minDb = -90.0;
-      const double maxDb = 0.0;
-      final double normalized =
-          ((dbValue.clamp(minDb, maxDb) - minDb) / (maxDb - minDb));
-      final double barHeight = normalized * size.height;
-
-      if (barHeight > 0) {
-        // Draw circles instead of rects for a more "bubbly" look
-        canvas.drawCircle(
-          Offset(
-            i * barWidth + halfBarWidth,
-            size.height - barHeight,
-          ),
-          halfBarWidth * 2.5, // Make circles overlap
-          paint,
+    // Try to re-select the previously selected device
+    if (oldSelectedDeviceId != null) {
+      try {
+        _selectedAudioDevice = _audioDevices.firstWhere(
+          (d) => d.id == oldSelectedDeviceId,
         );
+      } catch (e) {
+        // If the old device is no longer available, select the first one.
+        _selectedAudioDevice = _audioDevices.isNotEmpty ? _audioDevices.first : null;
+      }
+    } else {
+      // If no device was previously selected, select the first one.
+      _selectedAudioDevice = _audioDevices.isNotEmpty ? _audioDevices.first : null;
+    }
+
+    notifyListeners();
+  }
+
+  Future<void> changeAudioDevice(InputDevice device) async {
+    final wasListening = _isListening;
+    if (wasListening) {
+      await stopListening();
+    }
+    _selectedAudioDevice = device;
+    notifyListeners();
+    if (wasListening) {
+      await startListening();
+    }
+  }
+
+  Future<void> startListening() async {
+    if (_isListening || _selectedAudioDevice == null) return;
+
+    if (await Permission.microphone.request().isGranted) {
+      try {
+        final stream = await _audioRecorder.startStream(const RecordConfig(
+          encoder: AudioEncoder.pcm16bits,
+          sampleRate: 44100,
+          numChannels: 1,
+        ));
+
+        _audioSubscription = stream.listen(
+          (data) {
+            _processAudio(data);
+          },
+          onError: (error) {
+            if (kDebugMode) {
+              print('Error: $error');
+            }
+            _isListening = false;
+            notifyListeners();
+          },
+        );
+        _isListening = true;
+        notifyListeners();
+      } catch (e) {
+        if (kDebugMode) {
+          print('Error starting audio capture: $e');
+        }
+      }
+    } else {
+      if (kDebugMode) {
+        print('Microphone permission denied');
       }
     }
   }
 
-  @override
-  bool shouldRepaint(covariant SpectrumPainter oldDelegate) {
-    // Let the TweenAnimationBuilder handle the repaint decision.
-    return true;
+  Future<void> stopListening() async {
+    await _audioRecorder.stop();
+    _audioSubscription?.cancel();
+    _audioSubscription = null;
+    _isListening = false;
+    // Reset to a silent baseline instead of an empty list
+    _latestFft = List<double>.filled(_numBands, _dbMin);
+    notifyListeners();
+  }
+
+
+  void _processAudio(Uint8List data) {
+    if (data.isEmpty) return;
+
+    final pcm = Int16List.sublistView(data);
+    final samples = pcm.map((s) => s.toDouble()).toList();
+
+    if (samples.isEmpty) return;
+
+    final windowedSamples = _applyHannWindow(samples);
+
+    final fft = FFT(windowedSamples.length);
+    final fftResult = fft.realFft(windowedSamples);
+
+    final magnitudes = fftResult.magnitudes();
+    final half = magnitudes.length ~/ 2;
+    final halfMagnitudes = magnitudes.sublist(0, half);
+
+    final dbValues = halfMagnitudes.map((mag) {
+      final safeMag = mag.clamp(1e-10, double.infinity);
+      final db = 20 * _log10(safeMag);
+      return db.clamp(_dbMin, 0.0);
+    }).toList();
+
+    _latestFft = _groupIntoBands(dbValues, _numBands);
+    notifyListeners();
+  }
+
+  List<double> _groupIntoBands(List<double> data, int numBands) {
+    if (data.isEmpty) return [];
+    final List<double> bands = List<double>.filled(numBands, _dbMin);
+    final int groupSize = data.length ~/ numBands;
+    if (groupSize == 0) {
+      return List<double>.filled(numBands, _dbMin);
+    }
+
+    for (int i = 0; i < numBands; i++) {
+      final int start = i * groupSize;
+      final int end = start + groupSize;
+
+      double maxVal = _dbMin;
+      for (int j = start; j < end; j++) {
+        if (j < data.length && data[j] > maxVal) {
+          maxVal = data[j];
+        }
+      }
+      bands[i] = maxVal;
+    }
+    return bands;
+  }
+
+  List<double> _applyHannWindow(List<double> samples) {
+    final int N = samples.length;
+    if (N <= 1) return List<double>.from(samples);
+
+    final List<double> out = List<double>.filled(N, 0.0);
+    for (int n = 0; n < N; n++) {
+      final double w = 0.5 * (1 - cos(2 * pi * n / (N - 1)));
+      out[n] = samples[n] * w;
+    }
+    return out;
   }
 }
+
+double _log10(double x) => log(x) / ln10;

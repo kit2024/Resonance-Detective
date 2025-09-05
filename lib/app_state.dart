@@ -24,6 +24,8 @@ class AppState with ChangeNotifier {
   InputDevice? get selectedAudioDevice => _selectedAudioDevice;
 
   AppState() {
+    // Initialize with a silent baseline
+    _latestFft = List<double>.filled(_numBands, _dbMin);
     // Fetch audio devices on initialization
     refreshAudioDevices();
   }
@@ -74,11 +76,10 @@ class AppState with ChangeNotifier {
 
     if (await Permission.microphone.request().isGranted) {
       try {
-        final stream = await _audioRecorder.startStream(RecordConfig(
+        final stream = await _audioRecorder.startStream(const RecordConfig(
           encoder: AudioEncoder.pcm16bits,
           sampleRate: 44100,
           numChannels: 1,
-          device: _selectedAudioDevice,
         ));
 
         _audioSubscription = stream.listen(
@@ -112,7 +113,8 @@ class AppState with ChangeNotifier {
     _audioSubscription?.cancel();
     _audioSubscription = null;
     _isListening = false;
-    _latestFft = [];
+    // Reset to a silent baseline instead of an empty list
+    _latestFft = List<double>.filled(_numBands, _dbMin);
     notifyListeners();
   }
 
